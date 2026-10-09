@@ -1,0 +1,14 @@
+# Xcode
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XcodeGen 生成物（不要提交，CI 里会自动生成）
+*.xcodeproj
+*.xcworkspace
+
+# macOS
+.DS_Store
