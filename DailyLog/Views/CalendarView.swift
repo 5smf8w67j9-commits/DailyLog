@@ -14,6 +14,10 @@ struct CalendarView: View {
     @State private var showExport = false
     @State private var exporting = false
 
+    /// 没有内容可分享时的提示
+    @State private var showEmptyAlert = false
+    @State private var emptyAlertText = ""
+
     private let cal = Calendar.current
     private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
@@ -76,6 +80,11 @@ struct CalendarView: View {
             .sheet(isPresented: $showExport) {
                 ExportPreviewSheet(image: exportImage, month: monthAnchor)
             }
+            .alert("还没有内容可以分享", isPresented: $showEmptyAlert) {
+                Button("好", role: .cancel) { }
+            } message: {
+                Text(emptyAlertText)
+            }
             .task {
                 await checker.check(silent: true)
             }
@@ -86,6 +95,19 @@ struct CalendarView: View {
     // MARK: - 导出
 
     private func exportMonth() {
+        guard !exporting else { return }
+
+        // 先看看这个月到底有没有东西可导出，没有就明确提示，而不是"闪一下"没反应
+        guard !store.entries(in: monthAnchor).isEmpty else {
+            emptyAlertText = store.recordedDayCount == 0
+                ? "你还没有写过任何记录。先写下今天的新鲜事，再来生成月历长图吧。"
+                : "\(DayText.monthTitle(monthAnchor)) 还没有记录，先去写点什么吧。"
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                showEmptyAlert = true
+            }
+            return
+        }
+
         exporting = true
         let month = monthAnchor
         Task { @MainActor in
@@ -94,6 +116,9 @@ struct CalendarView: View {
             if let image {
                 exportImage = image
                 showExport = true
+            } else {
+                emptyAlertText = "长图生成失败了，换个时间再试试。"
+                showEmptyAlert = true
             }
         }
     }

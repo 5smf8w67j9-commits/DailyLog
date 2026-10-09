@@ -16,7 +16,12 @@ struct DayDetailView: View {
     @State private var newTag = ""
     @State private var showCamera = false
 
-    @FocusState private var focused: Bool
+    /// 当前正在编辑的输入位（用于键盘弹起时把对应区域滚进可见范围）
+    private enum Field: Hashable { case tag, editor }
+    @FocusState private var focus: Field?
+
+    private static let editorID = "detail.editor"
+    private static let tagsID = "detail.tags"
 
     private static let moods = ["😄", "🙂", "😐", "😔", "😤", "😭"]
     private static let weathers = ["☀️", "⛅️", "☁️", "🌧️", "❄️", "🌫️"]
@@ -29,23 +34,32 @@ struct DayDetailView: View {
     private var entry: Entry { store.entry(for: date) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header.staggered(0)
-                moodWeatherSection.staggered(1)
-                tagsSection.staggered(2)
-                imagesSection.staggered(3)
-                editor.staggered(4)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header.staggered(0)
+                    moodWeatherSection.staggered(1)
+                    tagsSection.staggered(2)
+                    imagesSection.staggered(3)
+                    editor.staggered(4)
+                }
+                .padding(16)
+                // 键盘遮挡时留出一点余量，保证最后一块内容能完整滚上来
+                .padding(.bottom, focus == nil ? 0 : 12)
             }
-            .padding(16)
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.Background())
+            .navigationTitle(DayText.short(date))
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: focus) { field in
+                guard let field else { return }
+                scrollToField(field, proxy: proxy)
+            }
         }
-        .background(Theme.Background())
-        .navigationTitle(DayText.short(date))
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
-                Button("完成") { focused = false }
+                Button("完成") { focus = nil }
             }
         }
         .sheet(isPresented: $showCamera) {
@@ -74,6 +88,19 @@ struct DayDetailView: View {
                     date = Date()
                 }
                 text = store.entry(for: date).text
+            }
+        }
+    }
+
+    // MARK: - 键盘避让
+
+    /// 键盘弹起时，等布局稳定后把正在编辑的区域滚到底部可见处
+    private func scrollToField(_ field: Field, proxy: ScrollViewProxy) {
+        let target = (field == .editor) ? Self.editorID : Self.tagsID
+        // 键盘动画大约 0.25s，稍微等一会儿再滚，避免滚到一半被顶回去
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            withAnimation(.easeOut(duration: 0.28)) {
+                proxy.scrollTo(target, anchor: .bottom)
             }
         }
     }
@@ -181,6 +208,12 @@ struct DayDetailView: View {
                         addingTag.toggle()
                         if !addingTag { newTag = "" }
                     }
+                    if addingTag {
+                        // 输入框是刚插进来的，等一帧再聚焦，否则聚焦不上
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { focus = .tag }
+                    } else {
+                        focus = nil
+                    }
                 } label: {
                     Image(systemName: addingTag ? "xmark.circle.fill" : "plus.circle.fill")
                         .foregroundStyle(Color.accentColor)
@@ -215,6 +248,7 @@ struct DayDetailView: View {
             if addingTag {
                 HStack(spacing: 8) {
                     TextField("新标签，例如：旅行", text: $newTag)
+                        .focused($focus, equals: .tag)
                         .autocorrectionDisabled()
                         .submitLabel(.done)
                         .onSubmit { commitTag() }
@@ -251,6 +285,7 @@ struct DayDetailView: View {
         }
         .softCard(padding: 14, radius: 16)
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: entry.tags)
+        .id(Self.tagsID)
     }
 
     private func commitTag() {
@@ -368,7 +403,7 @@ struct DayDetailView: View {
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $text)
-                    .focused($focused)
+                    .focused($focus, equals: .editor)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 200)
                     .padding(.horizontal, 12)
@@ -378,11 +413,12 @@ struct DayDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(focused ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
+                    .strokeBorder(focus == .editor ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
             )
-            .animation(.easeInOut(duration: 0.2), value: focused)
+            .animation(.easeInOut(duration: 0.2), value: focus)
         }
         .softCard(padding: 14, radius: 16)
+        .id(Self.editorID)
     }
 
     // MARK: - 导入图片

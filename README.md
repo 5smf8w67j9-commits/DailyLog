@@ -17,7 +17,9 @@
 - **每天自动换新页**：跨过零点后，停在"今天"的页面会自动切到新的一天，空白待记；App 回到前台时也会立刻校准。
 - **本地存储**：文字存 `Documents/entries.json`，图片压缩后存 `Documents/Images/`，完全离线，不联网。
 - **应用内检查更新**：启动时静默检查 Releases 上的新版本，有新版会在左上角显示红点；点开「设置」可以手动检查并跳转下载。
-- **深浅色**：跟随系统。
+- **深浅色**：设置里可以选「跟随系统 / 浅色 / 深色」，只影响本 App。
+- **备份与恢复**：把全部记录和图片导出成一个文件（可以存到 iCloud 云盘、微信、电脑），换手机时导入合并回来。同一天按修改时间取较新的一份，不会覆盖刚写的内容。
+- **键盘自动避让**：点开输入框，页面会自动把正在写的那一块滚到键盘上方。
 
 ### 节假日数据的维护
 
@@ -55,15 +57,16 @@ DailyLog/
     ├── Info.plist
     ├── DailyLogApp.swift
     ├── Models/Entry.swift
+    ├── Models/Appearance.swift       # 浅色 / 深色 / 跟随系统
     ├── Models/Holiday.swift          # 中国节假日 / 调休数据
-    ├── Store/EntryStore.swift
+    ├── Store/EntryStore.swift        # 读写、图片落盘、备份 / 恢复
     ├── Store/UpdateChecker.swift     # 应用内检查更新
     ├── Store/NotificationManager.swift # 每日提醒（本地通知）
     ├── Views/Theme.swift             # 视觉风格 / 卡片 / 动画 / 流式布局
     ├── Views/CalendarView.swift
     ├── Views/DayDetailView.swift
     ├── Views/SearchView.swift        # 全文搜索
-    ├── Views/SettingsView.swift      # 设置：提醒 / 统计 / 版本
+    ├── Views/SettingsView.swift      # 设置：外观 / 提醒 / 统计 / 备份 / 版本
     ├── Views/MonthExportView.swift   # 导出月历长图
     ├── Views/UIKitBridges.swift      # 相机、系统分享
     └── Assets.xcassets/            # 图标 + 主题色
@@ -129,9 +132,8 @@ python3 tools/make_icon.py
 
 ## 后续可加的功能
 
-- iCloud / 云端同步（需要后端或 CloudKit）
-- 全文搜索
-- 记录导出（PDF / 长图）
-- 每日提醒推送
-- 心情 / 标签
-- 拍照直接录入（现在只做了相册选图）
+- **iCloud 自动同步**（CloudKit）：需要付费 Apple 开发者账号（$99/年）+ iCloud entitlement，
+  免费账号自签的 App 拿不到这个权限，所以暂时用「备份与恢复」替代。
+- 安卓版（Kotlin + Jetpack Compose）
+- 记录导出 PDF
+- 手势 / 指纹锁

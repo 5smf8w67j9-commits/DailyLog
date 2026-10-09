@@ -195,10 +195,114 @@ final class EntryStore: ObservableObject {
         mutate(date) { $0.imageFiles.removeAll { $0 == name } }
     }
 
+    // MARK: - 备份 / 恢复
+    //
+    // 把全部记录 + 图片打包成一个 JSON 文件（图片按 base64 内嵌）。
+    // 导出后可以存到 iCloud 云盘、微信、电脑；换手机时导入即可合并回来。
+    // 这是当前（免费签名）方案下最实用的"跨设备同步"手段。
+
+    /// 备份文件的结构
+    struct BackupFile: Codable {
+        var format: String
+        var version: Int
+        var exportedAt: Date
+        var app: String
+        /// dateKey -> Entry
+        var entries: [String: Entry]
+        /// 图片文件名 -> JPEG 原始数据（JSON 中自动编码为 base64）
+        var images: [String: Data]
+    }
+
+    /// 备份文件里大致有多少东西，用于导入前的确认提示
+    struct BackupSummary {
+        var days: Int
+        var words: Int
+        var images: Int
+    }
+
+    enum BackupError: LocalizedError {
+        case badFormat
+
+        var errorDescription: String? {
+            switch self {
+            case .badFormat:
+                return "这个文件不是「每日记录」导出的备份"
+            }
+        }
+    }
+
+    static let backupFormat = "dailylog-backup"
+
+    /// 打包当前全部数据
+    func makeBackupData() throws -> Data {
+        var images: [String: Data] = [:]
+        for name in Set(entries.values.flatMap { $0.imageFiles }) {
+            if let data = try? Data(contentsOf: imagesDir.appendingPathComponent(name)) {
+                images[name] = data
+            }
+        }
+        let payload = BackupFile(format: Self.backupFormat,
+                                 version: 1,
+                                 exportedAt: Date(),
+                                 app: "每日记录",
+                                 entries: entries,
+                                 images: images)
+        return try JSONEncoder().encode(payload)
+    }
+
+    /// 只读取概要，不改动数据
+    func peekBackup(_ data: Data) throws -> BackupSummary {
+        let payload = try decodeBackup(data)
+        return BackupSummary(days: payload.entries.count,
+                             words: payload.entries.values.reduce(0) { $0 + $1.text.count },
+                             images: payload.images.count)
+    }
+
+    /// 合并恢复：同一天以 updatedAt 较新的为准，不会把本地更新的内容覆盖掉
+    @discardableResult
+    func restoreBackup(_ data: Data) throws -> (added: Int, updated: Int, images: Int) {
+        let payload = try decodeBackup(data)
+
+        var writtenImages = 0
+        for (name, imageData) in payload.images {
+            let url = imagesDir.appendingPathComponent(name)
+            guard !fm.fileExists(atPath: url.path) else { continue }
+            if (try? imageData.write(to: url, options: .atomic)) != nil {
+                writtenImages += 1
+            }
+        }
+
+        var added = 0
+        var updated = 0
+        var merged = entries
+        for (key, remote) in payload.entries {
+            if let local = merged[key] {
+                if remote.updatedAt > local.updatedAt {
+                    merged[key] = remote
+                    updated += 1
+                }
+            } else {
+                merged[key] = remote
+                added += 1
+            }
+        }
+
+        if added > 0 || updated > 0 {
+            entries = merged
+            save()
+        }
+        return (added, updated, writtenImages)
+    }
+
+    private func decodeBackup(_ data: Data) throws -> BackupFile {
+        let payload = try JSONDecoder().decode(BackupFile.self, from: data)
+        guard payload.format == Self.backupFormat else { throw BackupError.badFormat }
+        return payload
+    }
+
     // MARK: - 内部
 
-    /// 统一入口：取出当天记录 → 修改 → 回写（空则删除）
-    private func mutate(_ date: Date, _ change: (inout Entry) -> Void) {
+    /// 统一入口：取出当天记录 → 修改 → 回写（空则删除）    private func mutate(_ date: Date, _ change: (inout Entry) -> Void) {
         let key = DayKey.key(for: date)
         var e = entries[key] ?? Entry(dateKey: key)
         change(&e)
