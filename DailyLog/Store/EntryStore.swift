@@ -302,7 +302,8 @@ final class EntryStore: ObservableObject {
 
     // MARK: - 内部
 
-    /// 统一入口：取出当天记录 → 修改 → 回写（空则删除）    private func mutate(_ date: Date, _ change: (inout Entry) -> Void) {
+    /// 统一入口：取出当天记录 → 修改 → 回写（空则删除）
+    private func mutate(_ date: Date, _ change: (inout Entry) -> Void) {
         let key = DayKey.key(for: date)
         var e = entries[key] ?? Entry(dateKey: key)
         change(&e)
