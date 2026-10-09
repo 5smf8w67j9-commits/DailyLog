@@ -54,7 +54,7 @@ DailyLog/
 
 ## 方式二：本地用 Mac 编译
 
-需要 macOS + Xcode 15 以上。
+需要 macOS + Xcode 15 以上。App 最低支持 **iOS 16.0**。
 
 ```bash
 brew install xcodegen

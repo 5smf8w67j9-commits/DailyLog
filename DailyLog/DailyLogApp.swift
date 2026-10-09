@@ -9,7 +9,7 @@ struct DailyLogApp: App {
         WindowGroup {
             CalendarView()
                 .environmentObject(store)
-                .onChange(of: scenePhase) { _, phase in
+                .onChange(of: scenePhase) { phase in
                     // 回到前台时立刻校准"今天"，实现白天跨天自动换新页
                     if phase == .active {
                         store.refreshToday()

@@ -23,7 +23,7 @@ struct CalendarView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("每日记录")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) { monthAnchor = Date() }
                     } label: {

@@ -45,15 +45,15 @@ struct DayDetailView: View {
                 didLoad = true
             }
         }
-        .onChange(of: text) { _, newValue in
+        .onChange(of: text) { newValue in
             guard didLoad else { return }
             store.setText(newValue, for: date)
         }
-        .onChange(of: pickerItems) { _, items in
+        .onChange(of: pickerItems) { items in
             guard !items.isEmpty else { return }
             Task { await importPhotos(items) }
         }
-        .onChange(of: store.todayKey) { _, _ in
+        .onChange(of: store.todayKey) { _ in
             // 白天跨天：若当前停在"今天"的页面，自动切到新的一天，可以重新记录
             if followsToday {
                 date = Date()
