@@ -16,6 +16,13 @@ struct DayDetailView: View {
     @State private var newTag = ""
     @State private var showCamera = false
 
+    /// 全屏看图
+    @State private var viewerStart: String?
+    @State private var showViewer = false
+
+    /// 语音转文字
+    @StateObject private var speech = SpeechRecognizer()
+
     /// 当前正在编辑的输入位（用于键盘弹起时把对应区域滚进可见范围）
     private enum Field: Hashable { case tag, editor }
     @FocusState private var focus: Field?
@@ -66,6 +73,13 @@ struct DayDetailView: View {
             CameraPicker { image in
                 store.addImage(image, for: date)
             }
+        }
+        .fullScreenCover(isPresented: $showViewer) {
+            PhotoViewerSheet(store: store, date: date, start: viewerStart)
+        }
+        .onDisappear {
+            speech.stop()
+            store.flush()
         }
         .onAppear {
             if !didLoad {
@@ -323,6 +337,11 @@ struct DayDetailView: View {
                                 .frame(maxWidth: .infinity)
                                 .clipped()
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    viewerStart = name
+                                    showViewer = true
+                                }
                                 .overlay(alignment: .topTrailing) {
                                     Button {
                                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -335,6 +354,14 @@ struct DayDetailView: View {
                                             .foregroundStyle(Color.white, Color.black.opacity(0.45))
                                             .padding(6)
                                     }
+                                }
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(5)
+                                        .background(Circle().fill(Color.black.opacity(0.32)))
+                                        .padding(6)
                                 }
                                 .transition(.scale.combined(with: .opacity))
                         }
@@ -391,8 +418,12 @@ struct DayDetailView: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("今天的新鲜事")
-                .font(.subheadline).fontWeight(.semibold)
+            HStack(spacing: 8) {
+                Text("今天的新鲜事")
+                    .font(.subheadline).fontWeight(.semibold)
+                Spacer()
+                voiceButton
+            }
 
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
@@ -416,9 +447,76 @@ struct DayDetailView: View {
                     .strokeBorder(focus == .editor ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
             )
             .animation(.easeInOut(duration: 0.2), value: focus)
+
+            if speech.isRecording {
+                recordingBar
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if let error = speech.errorText {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
         }
         .softCard(padding: 14, radius: 16)
         .id(Self.editorID)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: speech.isRecording)
+    }
+
+    private var voiceButton: some View {
+        Button {
+            let base = text
+            Task {
+                await speech.toggle(baseText: base) { newValue in
+                    text = newValue
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: speech.isRecording ? "stop.fill" : "mic.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(speech.isRecording ? "停止" : "语音输入")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(speech.isRecording ? Color.red.opacity(0.15) : Color.accentColor.opacity(0.12))
+            .foregroundStyle(speech.isRecording ? Color.red : Color.accentColor)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().strokeBorder(speech.isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 1)
+            )
+        }
+        .pressable()
+    }
+
+    private var recordingBar: some View {
+        HStack(spacing: 9) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 7, height: 7)
+
+            Text("正在听…说完点「停止」")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            HStack(spacing: 2.5) {
+                ForEach(0..<5, id: \.self) { index in
+                    Capsule()
+                        .fill(Color.accentColor.opacity(speech.level > CGFloat(index) / 5 ? 0.9 : 0.18))
+                        .frame(width: 3, height: CGFloat(7 + index * 3))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color(.tertiarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - 导入图片

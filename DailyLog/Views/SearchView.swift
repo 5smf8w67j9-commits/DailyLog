@@ -164,9 +164,8 @@ struct SearchView: View {
                     Spacer(minLength: 0)
                 }
                 if !entry.summary.isEmpty {
-                    Text(entry.summary)
+                    highlighted(entry.summary, query: query)
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
@@ -198,5 +197,22 @@ struct SearchView: View {
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "M月"
         return f.string(from: date)
+    }
+
+    /// 把命中的关键词标成主题色加粗
+    private func highlighted(_ text: String, query: String) -> Text {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return Text(text) }
+
+        var result = Text("")
+        var rest = Substring(text)
+
+        while let range = rest.range(of: keyword, options: [.caseInsensitive, .diacriticInsensitive]) {
+            result = result + Text(String(rest[rest.startIndex..<range.lowerBound]))
+            result = result + Text(String(rest[range])).foregroundColor(.accentColor).bold()
+            rest = rest[range.upperBound...]
+        }
+        result = result + Text(String(rest))
+        return result
     }
 }

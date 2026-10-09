@@ -2,7 +2,11 @@ import Foundation
 import UserNotifications
 import SwiftUI
 
-/// 每日提醒（本地通知，不需要服务器）
+/// 每日提醒（本地通知，不需要服务器）。
+/// 不重复排一条，而是预排未来 14 天：
+/// - 如果那天正好有"往年今日"的记录，就推「那年今日」；
+/// - 否则推普通的写日记提醒。
+/// 这样同一天只会收到一条通知，不会吵。
 @MainActor
 final class NotificationManager: ObservableObject {
 
@@ -12,10 +16,15 @@ final class NotificationManager: ObservableObject {
     @Published private(set) var authorized: Bool = false
     @Published private(set) var lastError: String?
 
+    /// 预排的天数（iOS 单个 App 待发通知上限是 64 条，留足余量）
+    static let scheduleDays = 14
+
     private let kEnabled = "reminder.enabled"
     private let kHour = "reminder.hour"
     private let kMinute = "reminder.minute"
-    private let requestID = "dailylog.daily.reminder"
+    private let idPrefix = "dailylog.daily."
+    /// 旧版本用过的一次性 id，清理掉避免残留
+    private let legacyID = "dailylog.daily.reminder"
 
     init() {
         let d = UserDefaults.standard
@@ -34,18 +43,18 @@ final class NotificationManager: ObservableObject {
         authorized = (settings.authorizationStatus == .authorized)
     }
 
-    /// 保存设置并重新排程
-    func apply() async {
+    /// 保存设置并重新排程未来 14 天
+    func apply(using store: EntryStore? = nil) async {
         lastError = nil
         let d = UserDefaults.standard
         d.set(enabled, forKey: kEnabled)
         d.set(hour, forKey: kHour)
         d.set(minute, forKey: kMinute)
 
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [requestID])
+        clearScheduled()
         guard enabled else { return }
 
+        let center = UNUserNotificationCenter.current()
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             authorized = granted
@@ -60,32 +69,62 @@ final class NotificationManager: ObservableObject {
             return
         }
 
-        var comps = DateComponents()
-        comps.hour = hour
-        comps.minute = minute
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
 
-        let content = UNMutableNotificationContent()
-        content.title = "今天还没记呢"
-        content.body = "今天遇到什么新鲜事？花一分钟写下来吧"
-        content.sound = .default
+        for offset in 0..<Self.scheduleDays {
+            guard let day = cal.date(byAdding: .day, value: offset, to: today) else { continue }
+            let parts = cal.dateComponents([.year, .month, .day], from: day)
 
-        let request = UNNotificationRequest(identifier: requestID, content: content, trigger: trigger)
-        do {
-            try await center.add(request)
-        } catch {
-            lastError = "排程失败，请稍后重试"
+            var fire = DateComponents()
+            fire.year = parts.year
+            fire.month = parts.month
+            fire.day = parts.day
+            fire.hour = hour
+            fire.minute = minute
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: fire, repeats: false)
+            let request = UNNotificationRequest(identifier: idPrefix + "\(offset)",
+                                                content: makeContent(for: day, store: store),
+                                                trigger: trigger)
+            do {
+                try await center.add(request)
+            } catch {
+                lastError = "排程失败，请稍后重试"
+                return
+            }
         }
     }
 
     /// 打开提醒总开关时调用
-    func enable() async {
+    func enable(using store: EntryStore? = nil) async {
         enabled = true
-        await apply()
+        await apply(using: store)
     }
 
     func disable() async {
         enabled = false
         await apply()
+    }
+
+    // MARK: - 内部
+
+    private func makeContent(for day: Date, store: EntryStore?) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        content.sound = .default
+
+        if let preview = store?.onThisDayPreview(for: day) {
+            content.title = "那年今日 · \(preview.years) 年前的今天"
+            content.body = preview.text
+        } else {
+            content.title = "今天还没记呢"
+            content.body = "今天遇到什么新鲜事？花一分钟写下来吧"
+        }
+        return content
+    }
+
+    private func clearScheduled() {
+        let ids = (0..<Self.scheduleDays).map { idPrefix + "\($0)" } + [legacyID]
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
     }
 }

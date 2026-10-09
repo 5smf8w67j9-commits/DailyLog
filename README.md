@@ -10,12 +10,16 @@
 - **标签**：给每天打标签（旅行、美食…），支持从历史标签里一键复用。
 - **中国节假日**：日历上标注「休」「班」，含调休补班日，详情页显示节日名。数据来自国务院办公厅通知原文（已收录 2025、2026 年）。
 - **那年今日**：主页自动展示往年同一天的记录，点进去可以回看。
-- **全文搜索**：搜正文和标签，可按标签筛选。
+- **全文搜索**：搜正文和标签，可按标签筛选，命中关键词会高亮。
 - **每日详情页**：文字 + 图片（相册一次最多选 9 张，也可以直接拍照），自动保存，不用点保存按钮。
+- **语音输入**：点「语音输入」说话，实时转成文字。优先用设备端离线识别，识别内容不出手机。
+- **图片全屏查看**：点开大图，双指缩放、拖动、左右翻页，可以存回相册、分享、删除。
+- **记录统计**：连续记录天数、最长连续、26 周热力图、心情分布、标签统计。
+- **应用锁**：Face ID / Touch ID 解锁（可回退设备密码），离开 App 再回来需要验证。
 - **导出长图**：把一个月拼成一张长图，一键分享/保存。
-- **每日提醒**：本地通知，自定义时间提醒你写今天的新鲜事（不需要服务器）。
+- **每日提醒**：本地通知，自定义时间提醒你写今天的新鲜事（不需要服务器）。如果那天正好有往年同一天的记录，会改推「那年今日」。
 - **每天自动换新页**：跨过零点后，停在"今天"的页面会自动切到新的一天，空白待记；App 回到前台时也会立刻校准。
-- **本地存储**：文字存 `Documents/entries.json`，图片压缩后存 `Documents/Images/`，完全离线，不联网。
+- **本地存储**：文字存 `Documents/entries.json`，图片压缩后存 `Documents/Images/`，完全离线，不联网。写盘带防抖，语音输入时不会卡。
 - **应用内检查更新**：启动时静默检查 Releases 上的新版本，有新版会在左上角显示红点；点开「设置」可以手动检查并跳转下载。
 - **深浅色**：设置里可以选「跟随系统 / 浅色 / 深色」，只影响本 App。
 - **备份与恢复**：把全部记录和图片导出成一个文件（可以存到 iCloud 云盘、微信、电脑），换手机时导入合并回来。同一天按修改时间取较新的一份，不会覆盖刚写的内容。
@@ -59,14 +63,18 @@ DailyLog/
     ├── Models/Entry.swift
     ├── Models/Appearance.swift       # 浅色 / 深色 / 跟随系统
     ├── Models/Holiday.swift          # 中国节假日 / 调休数据
-    ├── Store/EntryStore.swift        # 读写、图片落盘、备份 / 恢复
+    ├── Store/EntryStore.swift        # 读写、图片落盘、统计、备份 / 恢复
     ├── Store/UpdateChecker.swift     # 应用内检查更新
-    ├── Store/NotificationManager.swift # 每日提醒（本地通知）
+    ├── Store/NotificationManager.swift # 每日提醒 / 那年今日（本地通知）
+    ├── Store/AppLock.swift           # 应用锁（Face ID / 设备密码）
+    ├── Store/SpeechRecognizer.swift  # 语音转文字（Speech 框架）
     ├── Views/Theme.swift             # 视觉风格 / 卡片 / 动画 / 流式布局
     ├── Views/CalendarView.swift
     ├── Views/DayDetailView.swift
-    ├── Views/SearchView.swift        # 全文搜索
-    ├── Views/SettingsView.swift      # 设置：外观 / 提醒 / 统计 / 备份 / 版本
+    ├── Views/SearchView.swift        # 全文搜索 + 关键词高亮
+    ├── Views/StatsView.swift         # 连续天数 / 热力图 / 心情分布
+    ├── Views/PhotoViewer.swift       # 全屏看图 + 存相册
+    ├── Views/SettingsView.swift      # 设置：外观 / 隐私 / 提醒 / 统计 / 备份 / 版本
     ├── Views/MonthExportView.swift   # 导出月历长图
     ├── Views/UIKitBridges.swift      # 相机、系统分享
     └── Assets.xcassets/            # 图标 + 主题色
@@ -130,10 +138,27 @@ python3 tools/make_icon.py
 | 图片压缩质量 / 最大边长 | `EntryStore.swift` → `addImage` 里的 `downscale(maxSide:quality:)` |
 | 每次最多选几张图 | `DayDetailView.swift` → `maxSelectionCount` |
 
+## 用到的系统权限
+
+| 权限 | 用途 |
+| --- | --- |
+| 相册（读） | 从相册选图插进日记 |
+| 相册（写） | 把日记里的图存回相册 |
+| 相机 | 直接拍照记录 |
+| 麦克风 | 语音输入 |
+| 语音识别 | 把说的话转成文字（优先设备端离线） |
+| Face ID | 应用锁 |
+| 通知 | 每日提醒 / 那年今日 |
+
+全部都是本地能力，App 不联网、不上传任何内容。
+
 ## 后续可加的功能
 
 - **iCloud 自动同步**（CloudKit）：需要付费 Apple 开发者账号（$99/年）+ iCloud entitlement，
   免费账号自签的 App 拿不到这个权限，所以暂时用「备份与恢复」替代。
+- **桌面 / 锁屏小组件**：需要新建 Widget Extension，并且要靠 App Group 才能读到主 App 的记录；
+  App Group 同样是付费账号才有的能力，而且自签时多一个 bundle 要签，容易把安装流程搞坏。
+  等上 TestFlight 之后再做最稳。
 - 安卓版（Kotlin + Jetpack Compose）
 - 记录导出 PDF
-- 手势 / 指纹锁
+- iPad 双栏布局

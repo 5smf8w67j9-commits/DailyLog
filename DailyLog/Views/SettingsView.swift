@@ -3,12 +3,15 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var store: EntryStore
+    @EnvironmentObject private var lock: AppLock
+    @EnvironmentObject private var notif: NotificationManager
     @ObservedObject var checker: UpdateChecker
-    @StateObject private var notif = NotificationManager()
     @Environment(\.dismiss) private var dismiss
 
     // 外观
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    // 应用锁
+    @AppStorage(AppLock.enabledKey) private var lockEnabled = false
 
     // 备份 / 恢复
     @State private var backupBusy = false
@@ -24,12 +27,19 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 appearanceSection
+                privacySection
                 reminderSection
 
                 Section("数据") {
                     statRow("已记录", "\(store.recordedDayCount) 天")
                     statRow("累计字数", "\(store.totalWordCount) 字")
                     statRow("图片", "\(store.totalImageCount) 张")
+
+                    NavigationLink {
+                        StatsView()
+                    } label: {
+                        Label("记录统计", systemImage: "chart.bar.fill")
+                    }
                 }
 
                 backupSection
@@ -95,6 +105,43 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - 隐私
+
+    @ViewBuilder
+    private var privacySection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { lockEnabled },
+                set: { on in
+                    lockEnabled = on
+                    if !on { lock.forceUnlock() }
+                }
+            )) {
+                Label("应用锁", systemImage: "faceid")
+            }
+            .disabled(!lock.isAvailable)
+
+            if lockEnabled {
+                HStack {
+                    Text("验证方式")
+                    Spacer()
+                    Text(lock.methodName)
+                        .foregroundStyle(.secondary)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        } header: {
+            Text("隐私")
+        } footer: {
+            if !lock.isAvailable {
+                Text("这台设备还没设置 Face ID 或锁屏密码，设置好之后才能开启应用锁。")
+            } else {
+                Text("开启后，每次离开 App 再回来都要用 \(lock.methodName) 验证一次。日记只存在本机，加道锁更安心。")
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: lockEnabled)
+    }
+
     // MARK: - 每日提醒
 
     @ViewBuilder
@@ -103,7 +150,7 @@ struct SettingsView: View {
             Toggle(isOn: Binding(
                 get: { notif.enabled },
                 set: { on in
-                    Task { on ? await notif.enable() : await notif.disable() }
+                    Task { on ? await notif.enable(using: store) : await notif.disable() }
                 }
             )) {
                 Label("每日提醒", systemImage: "bell.badge")
@@ -121,9 +168,9 @@ struct SettingsView: View {
             if let error = notif.lastError {
                 Text(error).foregroundStyle(.orange)
             } else if notif.enabled {
-                Text("每天 \(notif.timeText) 提醒你写今天的记录")
+                Text("每天 \(notif.timeText) 提醒你写今天的记录。如果那天正好有往年同一天的记录，会改推「那年今日」。")
             } else {
-                Text("到点提醒你写今天的新鲜事")
+                Text("到点提醒你写今天的新鲜事；有往年同一天的记录时会推「那年今日」。")
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notif.enabled)
@@ -141,7 +188,7 @@ struct SettingsView: View {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: newValue)
                 notif.hour = c.hour ?? 21
                 notif.minute = c.minute ?? 0
-                Task { await notif.apply() }
+                Task { await notif.apply(using: store) }
             }
         )
     }

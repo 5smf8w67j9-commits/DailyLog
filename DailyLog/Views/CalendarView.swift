@@ -28,7 +28,8 @@ struct CalendarView: View {
                 VStack(spacing: 18) {
                     todayCard.staggered(0)
                     monthCard.staggered(1)
-                    onThisDayCard.staggered(2)
+                    statsBar.staggered(2)
+                    onThisDayCard.staggered(3)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -362,6 +363,61 @@ struct CalendarView: View {
         if thumb != nil { return .white }
         if let h = holiday { return h.isOff ? .red : .orange }
         return .primary
+    }
+
+    // MARK: - 统计条
+
+    private var statsBar: some View {
+        NavigationLink {
+            StatsView()
+        } label: {
+            HStack(spacing: 0) {
+                statItem(value: "\(store.currentStreak)", unit: "天", title: "连续记录",
+                         icon: "flame.fill", tint: .orange)
+                statDivider
+                statItem(value: "\(store.recordedDayCount)", unit: "天", title: "累计记录",
+                         icon: "calendar", tint: .accentColor)
+                statDivider
+                statItem(value: "\(store.totalImageCount)", unit: "张", title: "照片",
+                         icon: "photo.fill", tint: .green)
+            }
+            .padding(.vertical, 15)
+            .frame(maxWidth: .infinity)
+            .softCard(padding: 0, radius: 18)
+        }
+        .pressable()
+    }
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(Color(.separator).opacity(0.45))
+            .frame(width: 0.5, height: 34)
+    }
+
+    private func statItem(value: String,
+                          unit: String,
+                          title: String,
+                          icon: String,
+                          tint: Color) -> some View {
+        VStack(spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .contentTransition(.numericText())
+                Text(unit)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                Text(title)
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 那年今日

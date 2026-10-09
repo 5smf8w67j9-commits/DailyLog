@@ -15,6 +15,7 @@ final class EntryStore: ObservableObject {
     private let imagesDir: URL
     private let storeURL: URL
     private var dayTimer: Timer?
+    private var pendingSave: DispatchWorkItem?
 
     init() {
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -123,6 +124,123 @@ final class EntryStore: ObservableObject {
         }.map(\.key)
     }
 
+    // MARK: - 连续记录 / 热力图
+
+    private func filled(_ date: Date) -> Bool {
+        guard let e = entries[DayKey.key(for: date)] else { return false }
+        return !e.isEmpty
+    }
+
+    /// 今天写了没
+    var hasToday: Bool { filled(Date()) }
+
+    /// 当前连续记录天数。今天还没写不算断，从昨天往前数。
+    var currentStreak: Int {
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: Date())
+        if !filled(day) {
+            guard let yesterday = cal.date(byAdding: .day, value: -1, to: day) else { return 0 }
+            day = yesterday
+        }
+        var count = 0
+        while filled(day) {
+            count += 1
+            guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { break }
+            day = prev
+        }
+        return count
+    }
+
+    /// 历史最长连续记录天数
+    var longestStreak: Int {
+        let cal = Calendar.current
+        let days = entries.values
+            .filter { !$0.isEmpty }
+            .compactMap { DayKey.date(from: $0.dateKey) }
+            .map { cal.startOfDay(for: $0) }
+            .sorted()
+        guard !days.isEmpty else { return 0 }
+
+        var best = 1
+        var run = 1
+        for i in 1..<days.count {
+            let gap = cal.dateComponents([.day], from: days[i - 1], to: days[i]).day ?? 0
+            if gap == 1 {
+                run += 1
+                best = max(best, run)
+            } else if gap > 1 {
+                run = 1
+            }
+        }
+        return best
+    }
+
+    /// 某天的"记录强度"0~4，用于热力图配色
+    func level(for date: Date) -> Int {
+        guard let e = entries[DayKey.key(for: date)], !e.isEmpty else { return 0 }
+        let words = e.text.trimmingCharacters(in: .whitespacesAndNewlines).count
+        var score = 0
+        if words > 0 { score += 1 }
+        if words >= 100 { score += 1 }
+        if !e.imageFiles.isEmpty { score += 1 }
+        if e.mood != nil || e.weather != nil { score += 1 }
+        return min(score, 4)
+    }
+
+    /// 热力图：最近 `weeks` 周，每列一周（周日 → 周六），未来日期为 nil
+    func heatmap(weeks: Int = 26, endingOn end: Date = Date()) -> [[Date?]] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: end)
+        let weekday = cal.component(.weekday, from: today)   // 1 = 周日
+        guard let thisWeekStart = cal.date(byAdding: .day, value: -(weekday - 1), to: today),
+              let firstWeekStart = cal.date(byAdding: .day, value: -7 * (weeks - 1), to: thisWeekStart)
+        else { return [] }
+
+        var cols: [[Date?]] = []
+        for w in 0..<weeks {
+            var col: [Date?] = []
+            for d in 0..<7 {
+                if let date = cal.date(byAdding: .day, value: w * 7 + d, to: firstWeekStart), date <= today {
+                    col.append(date)
+                } else {
+                    col.append(nil)
+                }
+            }
+            cols.append(col)
+        }
+        return cols
+    }
+
+    /// 心情出现次数，按次数从多到少
+    func moodCounts() -> [(mood: String, count: Int)] {
+        var counter: [String: Int] = [:]
+        for e in entries.values {
+            if let m = e.mood { counter[m, default: 0] += 1 }
+        }
+        return counter
+            .map { (mood: $0.key, count: $0.value) }
+            .sorted { $0.count == $1.count ? $0.mood < $1.mood : $0.count > $1.count }
+    }
+
+    /// 某个月里有记录的天数
+    func recordedDays(in month: Date) -> Int {
+        entries(in: month).count
+    }
+
+    /// 给「那年今日」通知用的一句话预览
+    func onThisDayPreview(for date: Date) -> (years: Int, text: String)? {
+        guard let item = pastYearsEntries(for: date).first else { return nil }
+        let years = DayText.year(date) - item.year
+        guard years > 0 else { return nil }
+
+        var parts: [String] = []
+        if let mood = item.entry.mood { parts.append(mood) }
+        let body = item.entry.summary
+        if !body.isEmpty { parts.append(String(body.prefix(38))) }
+        let text = parts.isEmpty ? "点开看看当时写了什么" : parts.joined(separator: " ")
+        return (years, text)
+    }
+
     // MARK: - 搜索
 
     /// 全文搜索：匹配正文与标签
@@ -187,12 +305,14 @@ final class EntryStore: ObservableObject {
             return false
         }
         mutate(date) { $0.imageFiles.append(name) }
+        flush()
         return true
     }
 
     func removeImage(named name: String, for date: Date) {
         try? fm.removeItem(at: imagesDir.appendingPathComponent(name))
         mutate(date) { $0.imageFiles.removeAll { $0 == name } }
+        flush()
     }
 
     // MARK: - 备份 / 恢复
@@ -313,6 +433,25 @@ final class EntryStore: ObservableObject {
         } else {
             entries[key] = e
         }
+        scheduleSave()
+    }
+
+    /// 写盘防抖：语音输入、快速打字时会高频触发，攒 0.5 秒写一次
+    private func scheduleSave() {
+        pendingSave?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.pendingSave = nil
+            self?.save()
+        }
+        pendingSave = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    /// 立刻把待写内容落盘（进后台、离开页面时调用）
+    func flush() {
+        guard let item = pendingSave else { return }
+        item.cancel()
+        pendingSave = nil
         save()
     }
 
