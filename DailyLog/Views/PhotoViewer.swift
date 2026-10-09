@@ -139,53 +139,21 @@ struct PhotoViewerSheet: View {
 
     private func saveToLibrary() {
         guard let name = current, let image = store.image(named: name) else { return }
-
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async {
-                    errorText = "没有相册写入权限，请到「设置 → 每日记录」里打开「照片」"
-                }
-                return
-            }
-            PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            } completionHandler: { success, error in
-                DispatchQueue.main.async {
-                    if success {
-                        showToast("已保存到相册")
-                    } else {
-                        errorText = error?.localizedDescription ?? "保存失败"
-                    }
-                }
+        PhotoActions.saveToLibrary(image) { result in
+            switch result {
+            case .success:
+                showToast("已保存到相册")
+            case .failure(let error):
+                errorText = error.localizedDescription
             }
         }
     }
 
     private func share() {
-        guard let name = current,
-              let image = store.image(named: name),
-              let data = image.jpegData(compressionQuality: 0.95) else { return }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("每日记录-\(DayKey.key(for: date))-\(index + 1).jpg")
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
+        guard let name = current, let image = store.image(named: name) else { return }
+        if !PhotoActions.share(image, filename: "每日记录-\(DayKey.key(for: date))-\(index + 1).jpg") {
             errorText = "导出图片失败"
-            return
         }
-
-        let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let root = scene.keyWindow?.rootViewController else { return }
-
-        var top = root
-        while let presented = top.presentedViewController { top = presented }
-        if let pop = activity.popoverPresentationController {
-            pop.sourceView = top.view
-            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.maxY, width: 0, height: 0)
-        }
-        top.present(activity, animated: true)
     }
 
     private func deleteCurrent() {

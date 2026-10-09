@@ -24,6 +24,10 @@
 - **深浅色**：设置里可以选「跟随系统 / 浅色 / 深色」，只影响本 App。
 - **备份与恢复**：把全部记录和图片导出成一个文件（可以存到 iCloud 云盘、微信、电脑），换手机时导入合并回来。同一天按修改时间取较新的一份，不会覆盖刚写的内容。
 - **键盘自动避让**：点开输入框，页面会自动把正在写的那一块滚到键盘上方。
+- **长按菜单**：长按今日卡片 / 日历格子 / 那年今日 / 搜索结果 / 图片缩略图，都会浮起一张预览卡并弹出对应的操作菜单（快速记一句、设心情、复制、导出单天长图、设为封面、清空这天…）。
+- **长按手势**：月份左右箭头长按连续翻月；长按月份标题一键回到本月。
+- **触觉反馈**：点按、选择、长按激活、保存成功、删除，都有对应强度的震动。
+- **桌面图标长按**：长按「每日记录」图标可以直接「写今天的记录」或打开「记录统计」。
 
 ### 节假日数据的维护
 
@@ -62,15 +66,20 @@ DailyLog/
     ├── DailyLogApp.swift
     ├── Models/Entry.swift
     ├── Models/Appearance.swift       # 浅色 / 深色 / 跟随系统
+    ├── Models/MoodCatalog.swift      # 心情 / 天气选项与中文名
     ├── Models/Holiday.swift          # 中国节假日 / 调休数据
     ├── Store/EntryStore.swift        # 读写、图片落盘、统计、备份 / 恢复
     ├── Store/UpdateChecker.swift     # 应用内检查更新
     ├── Store/NotificationManager.swift # 每日提醒 / 那年今日（本地通知）
     ├── Store/AppLock.swift           # 应用锁（Face ID / 设备密码）
     ├── Store/SpeechRecognizer.swift  # 语音转文字（Speech 框架）
-    ├── Views/Theme.swift             # 视觉风格 / 卡片 / 动画 / 流式布局
+    ├── Store/AppRouter.swift         # 路由 + 桌面快捷方式转发
+    ├── Views/Theme.swift             # 视觉风格 / 卡片 / 动画 / 提示条 / 流式布局
+    ├── Views/Haptics.swift           # 触觉反馈
     ├── Views/CalendarView.swift
     ├── Views/DayDetailView.swift
+    ├── Views/DayPeekCard.swift       # 长按浮起的预览卡
+    ├── Views/QuickNoteSheet.swift    # 快速记一句
     ├── Views/SearchView.swift        # 全文搜索 + 关键词高亮
     ├── Views/StatsView.swift         # 连续天数 / 热力图 / 心情分布
     ├── Views/PhotoViewer.swift       # 全屏看图 + 存相册

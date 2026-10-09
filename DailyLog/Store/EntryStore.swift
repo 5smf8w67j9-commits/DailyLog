@@ -315,6 +315,41 @@ final class EntryStore: ObservableObject {
         flush()
     }
 
+    /// 把某张图提到第一位（日历格子的封面）
+    func moveImageToFront(_ name: String, for date: Date) {
+        mutate(date) { entry in
+            guard let index = entry.imageFiles.firstIndex(of: name), index > 0 else { return }
+            entry.imageFiles.remove(at: index)
+            entry.imageFiles.insert(name, at: 0)
+        }
+        flush()
+    }
+
+    /// 追加一段文字（快速记录用），空则忽略
+    func appendText(_ text: String, for date: Date) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        mutate(date) { entry in
+            if entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                entry.text = trimmed
+            } else {
+                entry.text += "\n" + trimmed
+            }
+        }
+        flush()
+    }
+
+    /// 清空某天的全部内容（含图片文件）
+    func clearDay(_ date: Date) {
+        let key = DayKey.key(for: date)
+        guard let entry = entries[key] else { return }
+        for name in entry.imageFiles {
+            try? fm.removeItem(at: imagesDir.appendingPathComponent(name))
+        }
+        entries[key] = nil
+        save()
+    }
+
     // MARK: - 备份 / 恢复
     //
     // 把全部记录 + 图片打包成一个 JSON 文件（图片按 base64 内嵌）。

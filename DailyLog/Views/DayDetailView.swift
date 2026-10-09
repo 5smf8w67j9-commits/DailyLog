@@ -23,15 +23,17 @@ struct DayDetailView: View {
     /// 语音转文字
     @StateObject private var speech = SpeechRecognizer()
 
+    /// 轻提示
+    @State private var toastText: String?
+    /// 图片操作出错时的提示
+    @State private var imageError: String?
+
     /// 当前正在编辑的输入位（用于键盘弹起时把对应区域滚进可见范围）
     private enum Field: Hashable { case tag, editor }
     @FocusState private var focus: Field?
 
     private static let editorID = "detail.editor"
     private static let tagsID = "detail.tags"
-
-    private static let moods = ["😄", "🙂", "😐", "😔", "😤", "😭"]
-    private static let weathers = ["☀️", "⛅️", "☁️", "🌧️", "❄️", "🌫️"]
 
     init(date: Date) {
         _date = State(initialValue: date)
@@ -56,12 +58,21 @@ struct DayDetailView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.Background())
+            .toast($toastText)
             .navigationTitle(DayText.short(date))
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: focus) { field in
                 guard let field else { return }
                 scrollToField(field, proxy: proxy)
             }
+        }
+        .alert("图片操作失败", isPresented: Binding(
+            get: { imageError != nil },
+            set: { if !$0 { imageError = nil } }
+        )) {
+            Button("好", role: .cancel) { imageError = nil }
+        } message: {
+            Text(imageError ?? "")
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -160,15 +171,17 @@ struct DayDetailView: View {
     private var moodWeatherSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             emojiRow(title: "心情",
-                     items: Self.moods,
+                     items: MoodCatalog.moods,
                      selected: entry.mood) { value in
+                Haptics.pick()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                     store.setMood(value, for: date)
                 }
             }
             emojiRow(title: "天气",
-                     items: Self.weathers,
+                     items: MoodCatalog.weathers,
                      selected: entry.weather) { value in
+                Haptics.pick()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                     store.setWeather(value, for: date)
                 }
@@ -238,6 +251,7 @@ struct DayDetailView: View {
                 FlowLayout(spacing: 7) {
                     ForEach(entry.tags, id: \.self) { tag in
                         Button {
+                            Haptics.pick()
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 store.setTags(entry.tags.filter { $0 != tag }, for: date)
                             }
@@ -311,6 +325,7 @@ struct DayDetailView: View {
 
     private func addTag(_ tag: String) {
         guard !entry.tags.contains(tag) else { return }
+        Haptics.pick()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             store.setTags(entry.tags + [tag], for: date)
             addingTag = false
@@ -344,9 +359,7 @@ struct DayDetailView: View {
                                 }
                                 .overlay(alignment: .topTrailing) {
                                     Button {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                            store.removeImage(named: name, for: date)
-                                        }
+                                        deleteImage(name)
                                     } label: {
                                         Image(systemName: "xmark.circle.fill")
                                             .font(.system(size: 19))
@@ -362,6 +375,42 @@ struct DayDetailView: View {
                                         .padding(5)
                                         .background(Circle().fill(Color.black.opacity(0.32)))
                                         .padding(6)
+                                }
+                                .contextMenu {
+                                    Button {
+                                        openViewer(name)
+                                    } label: {
+                                        Label("全屏查看", systemImage: "arrow.up.left.and.arrow.down.right")
+                                    }
+                                    Button {
+                                        saveImageToLibrary(name)
+                                    } label: {
+                                        Label("保存到相册", systemImage: "square.and.arrow.down")
+                                    }
+                                    Button {
+                                        shareImage(name)
+                                    } label: {
+                                        Label("分享", systemImage: "square.and.arrow.up")
+                                    }
+                                    if entry.imageFiles.first != name {
+                                        Button {
+                                            setAsCover(name)
+                                        } label: {
+                                            Label("设为封面", systemImage: "star")
+                                        }
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        deleteImage(name)
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
+                                } preview: {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 260, height: 260)
+                                        .clipped()
                                 }
                                 .transition(.scale.combined(with: .opacity))
                         }
@@ -517,6 +566,48 @@ struct DayDetailView: View {
         .padding(.vertical, 9)
         .background(Color(.tertiarySystemFill))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - 图片动作（缩略图长按菜单）
+
+    private func openViewer(_ name: String) {
+        viewerStart = name
+        showViewer = true
+    }
+
+    private func saveImageToLibrary(_ name: String) {
+        guard let image = store.image(named: name) else { return }
+        PhotoActions.saveToLibrary(image) { result in
+            switch result {
+            case .success:
+                Haptics.success()
+                Toast.show("已保存到相册", into: $toastText)
+            case .failure(let error):
+                imageError = error.localizedDescription
+            }
+        }
+    }
+
+    private func shareImage(_ name: String) {
+        guard let image = store.image(named: name) else { return }
+        let filename = "每日记录-\(DayKey.key(for: date))-\(name).jpg"
+        if !PhotoActions.share(image, filename: filename) {
+            imageError = "导出图片失败"
+        }
+    }
+
+    private func setAsCover(_ name: String) {
+        store.moveImageToFront(name, for: date)
+        Haptics.pick()
+        Toast.show("已设为封面", into: $toastText)
+    }
+
+    private func deleteImage(_ name: String) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            store.removeImage(named: name, for: date)
+        }
+        Haptics.warning()
+        Toast.show("已删除", into: $toastText)
     }
 
     // MARK: - 导入图片

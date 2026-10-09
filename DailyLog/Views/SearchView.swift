@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SearchView: View {
     @EnvironmentObject private var store: EntryStore
@@ -8,12 +9,18 @@ struct SearchView: View {
     @State private var selectedTag: String?
     @FocusState private var focused: Bool
 
+    /// 结果页自己的导航栈，长按菜单里的"打开这天"要能程序化跳转
+    @State private var path: [Date] = []
+    @State private var pendingDelete: Date?
+    @State private var showDeleteAlert = false
+    @State private var toastText: String?
+
     private var results: [Entry] {
         store.search(query, tag: selectedTag)
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     searchField
@@ -33,14 +40,24 @@ struct SearchView: View {
                 .padding(.bottom, 32)
             }
             .background(Theme.Background())
+            .toast($toastText)
             .navigationTitle("搜索")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: Date.self) { date in
+                DayDetailView(date: date)
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") { dismiss() }
                 }
             }
             .onAppear { focused = true }
+            .alert("删除这天的记录？", isPresented: $showDeleteAlert) {
+                Button("取消", role: .cancel) { pendingDelete = nil }
+                Button("删除", role: .destructive) { confirmDelete() }
+            } message: {
+                Text("文字、图片、心情、标签都会删掉，无法恢复。")
+            }
         }
     }
 
@@ -130,13 +147,32 @@ struct SearchView: View {
             LazyVStack(spacing: 10) {
                 ForEach(Array(list.enumerated()), id: \.element.id) { index, entry in
                     if let date = DayKey.date(from: entry.dateKey) {
-                        NavigationLink {
-                            DayDetailView(date: date)
-                        } label: {
+                        NavigationLink(value: date) {
                             resultRow(entry)
                         }
                         .pressable()
                         .staggered(min(index, 8))
+                        .contextMenu {
+                            Button {
+                                path.append(date)
+                            } label: {
+                                Label("打开这天", systemImage: "arrow.up.forward.square")
+                            }
+                            Button {
+                                copyEntry(entry)
+                            } label: {
+                                Label("复制内容", systemImage: "doc.on.doc")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                pendingDelete = date
+                                showDeleteAlert = true
+                            } label: {
+                                Label("删除这天的记录", systemImage: "trash")
+                            }
+                        } preview: {
+                            DayPeekCard(date: date, store: store)
+                        }
                     }
                 }
             }
@@ -214,5 +250,40 @@ struct SearchView: View {
         }
         result = result + Text(String(rest))
         return result
+    }
+
+    // MARK: - 长按菜单动作
+
+    private func copyEntry(_ entry: Entry) {
+        var lines: [String] = []
+        if let date = DayKey.date(from: entry.dateKey) {
+            lines.append(DayText.full(date))
+        }
+        if let mood = entry.mood {
+            lines.append("心情：\(mood) \(MoodCatalog.moodName(mood))")
+        }
+        if let weather = entry.weather {
+            lines.append("天气：\(weather) \(MoodCatalog.weatherName(weather))")
+        }
+        if !entry.summary.isEmpty {
+            lines.append("")
+            lines.append(entry.summary)
+        }
+        if !entry.tags.isEmpty {
+            lines.append("")
+            lines.append(entry.tags.map { "#\($0)" }.joined(separator: " "))
+        }
+
+        UIPasteboard.general.string = lines.joined(separator: "\n")
+        Haptics.success()
+        Toast.show("已复制", into: $toastText)
+    }
+
+    private func confirmDelete() {
+        guard let date = pendingDelete else { return }
+        store.clearDay(date)
+        Haptics.warning()
+        Toast.show("已删除 \(DayText.short(date)) 的记录", into: $toastText)
+        pendingDelete = nil
     }
 }

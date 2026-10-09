@@ -44,17 +44,70 @@ extension View {
         modifier(Theme.Card(padding: padding, radius: radius))
     }
 
-    /// 轻点时的回弹
-    func pressable() -> some View {
-        buttonStyle(PressableButtonStyle())
+    /// 轻点时的回弹 + 触觉反馈
+    func pressable(haptic: Bool = true) -> some View {
+        buttonStyle(PressableButtonStyle(haptic: haptic))
+    }
+
+    /// 顶部浮出的小提示
+    func toast(_ text: Binding<String?>) -> some View {
+        modifier(ToastModifier(text: text))
     }
 }
 
 struct PressableButtonStyle: ButtonStyle {
+    var haptic: Bool = true
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.spring(response: 0.28, dampingFraction: 0.7), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { pressed in
+                if pressed && haptic {
+                    Haptics.tap()
+                }
+            }
+    }
+}
+
+/// 一闪而过的小提示条
+struct ToastModifier: ViewModifier {
+    @Binding var text: String?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+                if let text {
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(Color.black.opacity(0.78))
+                        .clipShape(Capsule())
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: text)
+    }
+}
+
+/// 统一的提示条触发方式
+@MainActor
+enum Toast {
+    static func show(_ message: String, into binding: Binding<String?>) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            binding.wrappedValue = message
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+            if binding.wrappedValue == message {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    binding.wrappedValue = nil
+                }
+            }
+        }
     }
 }
 

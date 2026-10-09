@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct CalendarView: View {
     @EnvironmentObject private var store: EntryStore
+    @EnvironmentObject private var router: AppRouter
 
     @StateObject private var checker = UpdateChecker()
     @State private var monthAnchor: Date = Date()
@@ -18,12 +20,27 @@ struct CalendarView: View {
     @State private var showEmptyAlert = false
     @State private var emptyAlertText = ""
 
+    // MARK: 长按相关
+
+    /// 快速记一句
+    @State private var quickNote: DayTarget?
+    /// 单天导出
+    @State private var dayExport: DayExportTarget?
+    /// 待确认清空的那天
+    @State private var pendingClear: DayTarget?
+    @State private var showClearAlert = false
+    /// 月份箭头长按连续翻月
+    @State private var holdTask: Task<Void, Never>?
+    @State private var holdCancelled = false
+    /// 轻提示
+    @State private var toastText: String?
+
     private let cal = Calendar.current
     private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $router.path) {
             ScrollView {
                 VStack(spacing: 18) {
                     todayCard.staggered(0)
@@ -36,7 +53,16 @@ struct CalendarView: View {
                 .padding(.bottom, 32)
             }
             .background(Theme.Background())
+            .toast($toastText)
             .navigationTitle("每日记录")
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .day(let date):
+                    DayDetailView(date: date)
+                case .stats:
+                    StatsView()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button { showSettings = true } label: {
@@ -81,16 +107,42 @@ struct CalendarView: View {
             .sheet(isPresented: $showExport) {
                 ExportPreviewSheet(image: exportImage, month: monthAnchor)
             }
+            .sheet(item: $quickNote) { target in
+                QuickNoteSheet(date: target.date)
+                    .environmentObject(store)
+            }
+            .sheet(item: $dayExport) { target in
+                DayExportSheet(image: target.image, date: target.date)
+            }
             .alert("还没有内容可以分享", isPresented: $showEmptyAlert) {
                 Button("好", role: .cancel) { }
             } message: {
                 Text(emptyAlertText)
+            }
+            .alert("清空这天的记录？", isPresented: $showClearAlert) {
+                Button("取消", role: .cancel) { pendingClear = nil }
+                Button("清空", role: .destructive) { confirmClear() }
+            } message: {
+                Text("文字、图片、心情、标签都会删掉，无法恢复。")
             }
             .task {
                 await checker.check(silent: true)
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: checker.hasUpdate)
         }
+    }
+
+    // MARK: - 数据包装
+
+    private struct DayTarget: Identifiable {
+        var id: String { DayKey.key(for: date) }
+        let date: Date
+    }
+
+    private struct DayExportTarget: Identifiable {
+        var id: String { DayKey.key(for: date) }
+        let date: Date
+        let image: UIImage
     }
 
     // MARK: - 导出
@@ -110,6 +162,7 @@ struct CalendarView: View {
         }
 
         exporting = true
+        Haptics.bump()
         let month = monthAnchor
         Task { @MainActor in
             let image = Exporter.monthImage(month: month, store: store)
@@ -124,6 +177,59 @@ struct CalendarView: View {
         }
     }
 
+    private func exportDay(_ date: Date) {
+        guard !store.entry(for: date).isEmpty else {
+            Toast.show("这天还没有记录", into: $toastText)
+            return
+        }
+        Haptics.bump()
+        Task { @MainActor in
+            if let image = Exporter.dayImage(date: date, store: store) {
+                dayExport = DayExportTarget(date: date, image: image)
+            } else {
+                Toast.show("长图生成失败了", into: $toastText)
+            }
+        }
+    }
+
+    // MARK: - 复制 / 清空
+
+    private func copyDay(_ date: Date) {
+        let entry = store.entry(for: date)
+        guard !entry.isEmpty else {
+            Toast.show("这天还没有记录", into: $toastText)
+            return
+        }
+
+        var lines: [String] = [DayText.full(date)]
+        if let mood = entry.mood {
+            lines.append("心情：\(mood) \(MoodCatalog.moodName(mood))")
+        }
+        if let weather = entry.weather {
+            lines.append("天气：\(weather) \(MoodCatalog.weatherName(weather))")
+        }
+        if !entry.summary.isEmpty {
+            lines.append("")
+            lines.append(entry.summary)
+        }
+        if !entry.tags.isEmpty {
+            lines.append("")
+            lines.append(entry.tags.map { "#\($0)" }.joined(separator: " "))
+        }
+
+        UIPasteboard.general.string = lines.joined(separator: "\n")
+        Haptics.success()
+        Toast.show("已复制 \(DayText.short(date)) 的内容", into: $toastText)
+    }
+
+    private func confirmClear() {
+        guard let target = pendingClear else { return }
+        store.clearDay(target.date)
+        Haptics.warning()
+        Toast.show("已清空 \(DayText.short(target.date))", into: $toastText)
+        pendingClear = nil
+    }
+
     // MARK: - 今日卡片
 
     private var todayCard: some View {
@@ -131,9 +237,7 @@ struct CalendarView: View {
         let entry = store.entry(for: today)
         let holiday = ChineseHolidays.info(for: today)
 
-        return NavigationLink {
-            DayDetailView(date: today)
-        } label: {
+        return NavigationLink(value: Route.day(today)) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Text("今天 · \(DayText.short(today))")
@@ -211,6 +315,76 @@ struct CalendarView: View {
             )
         }
         .pressable()
+        .contextMenu {
+            todayMenu(today, entry: entry)
+        } preview: {
+            DayPeekCard(date: today, store: store)
+        }
+    }
+
+    @ViewBuilder
+    private func todayMenu(_ today: Date, entry: Entry) -> some View {
+        let moodTitle = entry.mood.map { "心情：\($0)" } ?? "设置心情"
+
+        Button {
+            quickNote = DayTarget(date: today)
+        } label: {
+            Label("快速记一句", systemImage: "square.and.pencil")
+        }
+
+        Button {
+            router.push(.day(today))
+        } label: {
+            Label(entry.isEmpty ? "写今天的新鲜事" : "继续写", systemImage: "pencil.line")
+        }
+
+        Menu {
+            ForEach(MoodCatalog.moods, id: \.self) { mood in
+                Button {
+                    store.setMood(mood, for: today)
+                    Haptics.pick()
+                } label: {
+                    Text("\(mood)  \(MoodCatalog.moodName(mood))")
+                }
+            }
+            if entry.mood != nil {
+                Divider()
+                Button(role: .destructive) {
+                    store.setMood(nil, for: today)
+                    Haptics.pick()
+                } label: {
+                    Label("清除心情", systemImage: "xmark.circle")
+                }
+            }
+        } label: {
+            Label(moodTitle, systemImage: "face.smiling")
+        }
+
+        Divider()
+
+        Button {
+            copyDay(today)
+        } label: {
+            Label("复制今天的内容", systemImage: "doc.on.doc")
+        }
+        .disabled(entry.isEmpty)
+
+        Button {
+            exportDay(today)
+        } label: {
+            Label("导出今天为图片", systemImage: "photo.on.rectangle")
+        }
+        .disabled(entry.isEmpty)
+
+        Divider()
+
+        Button(role: .destructive) {
+            pendingClear = DayTarget(date: today)
+            showClearAlert = true
+        } label: {
+            Label("清空今天", systemImage: "trash")
+        }
+        .disabled(entry.isEmpty)
     }
 
     // MARK: - 月历
@@ -225,12 +399,19 @@ struct CalendarView: View {
                         .background(Circle().fill(Color(.tertiarySystemFill)))
                 }
                 .pressable()
+                .simultaneousGesture(holdGesture(-1))
 
                 Spacer()
 
                 Text(DayText.monthTitle(monthAnchor))
                     .font(.headline)
                     .contentTransition(.numericText())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: 0.35) {
+                        goToThisMonth()
+                    }
 
                 Spacer()
 
@@ -241,6 +422,7 @@ struct CalendarView: View {
                         .background(Circle().fill(Color(.tertiarySystemFill)))
                 }
                 .pressable()
+                .simultaneousGesture(holdGesture(1))
             }
             .padding(.horizontal, 2)
 
@@ -310,9 +492,7 @@ struct CalendarView: View {
         let holiday = ChineseHolidays.info(for: date)
         let has = store.hasContent(date)
 
-        NavigationLink {
-            DayDetailView(date: date)
-        } label: {
+        NavigationLink(value: Route.day(date)) {
             ZStack {
                 if let thumb {
                     Image(uiImage: thumb)
@@ -357,6 +537,40 @@ struct CalendarView: View {
             )
         }
         .pressable()
+        .contextMenu {
+            if has {
+                Button {
+                    router.push(.day(date))
+                } label: {
+                    Label("打开这天", systemImage: "arrow.up.forward.square")
+                }
+                Button {
+                    copyDay(date)
+                } label: {
+                    Label("复制内容", systemImage: "doc.on.doc")
+                }
+                Button {
+                    exportDay(date)
+                } label: {
+                    Label("导出这天为图片", systemImage: "photo.on.rectangle")
+                }
+                Divider()
+                Button(role: .destructive) {
+                    pendingClear = DayTarget(date: date)
+                    showClearAlert = true
+                } label: {
+                    Label("清空这天", systemImage: "trash")
+                }
+            } else {
+                Button {
+                    router.push(.day(date))
+                } label: {
+                    Label("补写这天", systemImage: "square.and.pencil")
+                }
+            }
+        } preview: {
+            DayPeekCard(date: date, store: store)
+        }
     }
 
     private func dayNumberColor(thumb: UIImage?, holiday: HolidayInfo?) -> Color {
@@ -368,9 +582,7 @@ struct CalendarView: View {
     // MARK: - 统计条
 
     private var statsBar: some View {
-        NavigationLink {
-            StatsView()
-        } label: {
+        NavigationLink(value: Route.stats) {
             HStack(spacing: 0) {
                 statItem(value: "\(store.currentStreak)", unit: "天", title: "连续记录",
                          icon: "flame.fill", tint: .orange)
@@ -439,9 +651,9 @@ struct CalendarView: View {
                 }
 
                 ForEach(past) { item in
-                    NavigationLink {
-                        DayDetailView(date: DayKey.date(from: item.entry.dateKey) ?? Date())
-                    } label: {
+                    let itemDate = DayKey.date(from: item.entry.dateKey) ?? Date()
+
+                    NavigationLink(value: Route.day(itemDate)) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 6) {
                                 Text("\(item.year) 年的今天")
@@ -474,6 +686,25 @@ struct CalendarView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .pressable()
+                    .contextMenu {
+                        Button {
+                            router.push(.day(itemDate))
+                        } label: {
+                            Label("打开这天", systemImage: "arrow.up.forward.square")
+                        }
+                        Button {
+                            copyDay(itemDate)
+                        } label: {
+                            Label("复制内容", systemImage: "doc.on.doc")
+                        }
+                        Button {
+                            exportDay(itemDate)
+                        } label: {
+                            Label("导出这天为图片", systemImage: "photo.on.rectangle")
+                        }
+                    } preview: {
+                        DayPeekCard(date: itemDate, store: store)
+                    }
                 }
             }
             .softCard(padding: 14)
@@ -504,5 +735,59 @@ struct CalendarView: View {
         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
             monthAnchor = d
         }
+    }
+
+    /// 长按月标题 → 一键回到本月
+    private func goToThisMonth() {
+        let today = Date()
+        guard !cal.isDate(monthAnchor, equalTo: today, toGranularity: .month) else {
+            Toast.show("已经在当月了", into: $toastText)
+            return
+        }
+        Haptics.snap()
+        let target = cal.dateInterval(of: .month, for: today)?.start ?? today
+        monthDirection = target > monthAnchor ? 1 : -1
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            monthAnchor = today
+        }
+        Toast.show("回到本月", into: $toastText)
+    }
+
+    // MARK: - 月份箭头长按连续翻月
+
+    private func holdGesture(_ delta: Int) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let moved = abs(value.translation.width) > 14 || abs(value.translation.height) > 14
+                if moved {
+                    cancelHold()
+                    holdCancelled = true
+                } else if !holdCancelled && holdTask == nil {
+                    beginHold(delta)
+                }
+            }
+            .onEnded { _ in
+                cancelHold()
+                holdCancelled = false
+            }
+    }
+
+    private func beginHold(_ delta: Int) {
+        holdTask?.cancel()
+        holdTask = Task { @MainActor in
+            // 按满 0.32 秒才算长按
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            guard !Task.isCancelled else { return }
+            Haptics.snap()
+            while !Task.isCancelled {
+                shiftMonth(delta)
+                try? await Task.sleep(nanoseconds: 110_000_000)
+            }
+        }
+    }
+
+    private func cancelHold() {
+        holdTask?.cancel()
+        holdTask = nil
     }
 }

@@ -49,5 +49,24 @@
 	<string>需要使用语音识别，把你说的内容转成文字记下来。识别优先在本机完成。</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>需要使用 Face ID，用来给日记加一道锁。</string>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.lige.dailylog.today</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>写今天的记录</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeCompose</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.lige.dailylog.stats</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>记录统计</string>
+			<key>UIApplicationShortcutItemIconType</key>
+			<string>UIApplicationShortcutIconTypeFavorite</string>
+		</dict>
+	</array>
 </dict>
 </plist>

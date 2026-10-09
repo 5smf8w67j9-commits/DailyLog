@@ -2,9 +2,12 @@ import SwiftUI
 
 @main
 struct DailyLogApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     @StateObject private var store = EntryStore()
     @StateObject private var lock = AppLock()
     @StateObject private var notif = NotificationManager()
+    @StateObject private var router = AppRouter()
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -29,6 +32,7 @@ struct DailyLogApp: App {
             .environmentObject(store)
             .environmentObject(lock)
             .environmentObject(notif)
+            .environmentObject(router)
             // 在 App 内强制指定配色；nil 时跟随系统
             .preferredColorScheme(appearance.colorScheme)
             .animation(.easeInOut(duration: 0.28), value: appearanceRaw)
@@ -37,6 +41,19 @@ struct DailyLogApp: App {
                 // 冷启动时把未来几天的提醒排一遍
                 if notif.enabled {
                     await notif.apply(using: store)
+                }
+            }
+            .onAppear {
+                // 桌面图标长按 → 直接跳到对应页面
+                ShortcutBus.shared.attach { type in
+                    switch type {
+                    case ShortcutBus.todayType:
+                        router.openToday()
+                    case ShortcutBus.statsType:
+                        router.openStats()
+                    default:
+                        break
+                    }
                 }
             }
             .onChange(of: scenePhase) { phase in

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Photos
 
 /// 把一个月导出成一张长图
 @MainActor
@@ -22,6 +23,20 @@ enum Exporter {
         return renderer.uiImage
     }
 
+    /// 把某一天导出成一张竖版长图
+    static func dayImage(date: Date, store: EntryStore) -> UIImage? {
+        let entry = store.entry(for: date)
+        guard !entry.isEmpty else { return nil }
+
+        let content = DayExportView(date: date, entry: entry, store: store)
+            .frame(width: 390)
+            .environment(\.colorScheme, .light)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        return renderer.uiImage
+    }
+
     /// 写进临时目录，便于分享
     static func writeTempPNG(_ image: UIImage, name: String) -> URL? {
         guard let data = image.pngData() else { return nil }
@@ -31,6 +46,70 @@ enum Exporter {
             return url
         } catch {
             return nil
+        }
+    }
+}
+
+/// 图片的保存 / 分享动作，缩略图长按菜单和全屏查看器共用
+enum PhotoActions {
+
+    /// 存到系统相册
+    static func saveToLibrary(_ image: UIImage, completion: @escaping (Result<Void, Error>) -> Void) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    completion(.failure(PhotoActionError.noPermission))
+                }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        completion(.success(()))
+                    } else {
+                        completion(.failure(error ?? PhotoActionError.unknown))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 弹出系统分享面板
+    @discardableResult
+    static func share(_ image: UIImage, filename: String) -> Bool {
+        guard let data = image.jpegData(compressionQuality: 0.95) else { return false }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            return false
+        }
+
+        let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.keyWindow?.rootViewController else { return false }
+
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        if let pop = activity.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.maxY, width: 0, height: 0)
+        }
+        top.present(activity, animated: true)
+        return true
+    }
+
+    enum PhotoActionError: LocalizedError {
+        case noPermission
+        case unknown
+
+        var errorDescription: String? {
+            switch self {
+            case .noPermission: return "没有相册写入权限，请到「设置 → 每日记录」里打开「照片」"
+            case .unknown:      return "保存失败"
+            }
         }
     }
 }
