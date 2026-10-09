@@ -79,15 +79,38 @@ final class EntryStore: ObservableObject {
         return UIImage(data: data)
     }
 
+    /// 那年今日：往年同月同日、且写过内容的记录，按年份倒序
+    func pastYearsEntries(for date: Date) -> [PastEntry] {
+        let cal = Calendar.current
+        let target = cal.dateComponents([.year, .month, .day], from: date)
+        guard let tm = target.month, let td = target.day, let ty = target.year else { return [] }
+
+        var result: [PastEntry] = []
+        for (key, entry) in entries {
+            guard let d = DayKey.date(from: key) else { continue }
+            let c = cal.dateComponents([.year, .month, .day], from: d)
+            guard let y = c.year, let m = c.month, let day = c.day else { continue }
+            if m == tm && day == td && y < ty && !entry.isEmpty {
+                result.append(PastEntry(year: y, entry: entry))
+            }
+        }
+        return result.sorted { $0.year > $1.year }
+    }
+
     // MARK: - 写入
 
     func setText(_ text: String, for date: Date) {
         let key = DayKey.key(for: date)
-        var e = entries[key] ?? Entry(dateKey: key)
-        guard e.text != text else { return }
-        e.text = text
-        e.updatedAt = Date()
-        commit(e, key: key)
+        guard (entries[key]?.text ?? "") != text else { return }
+        mutate(date) { $0.text = text }
+    }
+
+    func setMood(_ mood: String?, for date: Date) {
+        mutate(date) { $0.mood = mood }
+    }
+
+    func setWeather(_ weather: String?, for date: Date) {
+        mutate(date) { $0.weather = weather }
     }
 
     @discardableResult
@@ -99,30 +122,27 @@ final class EntryStore: ObservableObject {
         } catch {
             return false
         }
-        let key = DayKey.key(for: date)
-        var e = entries[key] ?? Entry(dateKey: key)
-        e.imageFiles.append(name)
-        e.updatedAt = Date()
-        commit(e, key: key)
+        mutate(date) { $0.imageFiles.append(name) }
         return true
     }
 
     func removeImage(named name: String, for date: Date) {
-        let key = DayKey.key(for: date)
-        guard var e = entries[key] else { return }
-        e.imageFiles.removeAll { $0 == name }
-        e.updatedAt = Date()
         try? fm.removeItem(at: imagesDir.appendingPathComponent(name))
-        commit(e, key: key)
+        mutate(date) { $0.imageFiles.removeAll { $0 == name } }
     }
 
     // MARK: - 内部
 
-    private func commit(_ entry: Entry, key: String) {
-        if entry.isEmpty {
+    /// 统一入口：取出当天记录 → 修改 → 回写（空则删除）
+    private func mutate(_ date: Date, _ change: (inout Entry) -> Void) {
+        let key = DayKey.key(for: date)
+        var e = entries[key] ?? Entry(dateKey: key)
+        change(&e)
+        e.updatedAt = Date()
+        if e.isEmpty {
             entries[key] = nil
         } else {
-            entries[key] = entry
+            entries[key] = e
         }
         save()
     }

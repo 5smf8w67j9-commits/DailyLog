@@ -9,6 +9,10 @@ struct Entry: Identifiable, Codable, Hashable {
     var text: String
     /// 图片文件名（存于 Documents/Images/ 下）
     var imageFiles: [String]
+    /// 心情 emoji
+    var mood: String?
+    /// 天气 emoji
+    var weather: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -16,20 +20,47 @@ struct Entry: Identifiable, Codable, Hashable {
          dateKey: String,
          text: String = "",
          imageFiles: [String] = [],
+         mood: String? = nil,
+         weather: String? = nil,
          createdAt: Date = Date(),
          updatedAt: Date = Date()) {
         self.id = id
         self.dateKey = dateKey
         self.text = text
         self.imageFiles = imageFiles
+        self.mood = mood
+        self.weather = weather
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
-    /// 完全空白（文字与图片都为空）
-    var isEmpty: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageFiles.isEmpty
+    // 自定义解码：日后新增字段时，老数据仍能正常读出来，不会丢档
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        dateKey    = try c.decodeIfPresent(String.self, forKey: .dateKey) ?? ""
+        text       = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        imageFiles = try c.decodeIfPresent([String].self, forKey: .imageFiles) ?? []
+        mood       = try c.decodeIfPresent(String.self, forKey: .mood)
+        weather    = try c.decodeIfPresent(String.self, forKey: .weather)
+        createdAt  = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt  = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
+
+    /// 完全空白（文字、图片、心情、天气都没有）
+    var isEmpty: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && imageFiles.isEmpty
+            && mood == nil
+            && weather == nil
+    }
+}
+
+/// 往年的同一天，用于「那年今日」
+struct PastEntry: Identifiable {
+    var id: String { entry.dateKey }
+    let year: Int
+    let entry: Entry
 }
 
 /// 日期与日期字符串的互转（固定时区安全的 yyyy-MM-dd）

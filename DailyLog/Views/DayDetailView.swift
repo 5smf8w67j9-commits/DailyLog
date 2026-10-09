@@ -14,6 +14,9 @@ struct DayDetailView: View {
 
     @FocusState private var focused: Bool
 
+    private static let moods = ["😄", "🙂", "😐", "😔", "😤", "😭"]
+    private static let weathers = ["☀️", "⛅️", "☁️", "🌧️", "❄️", "🌫️"]
+
     init(date: Date) {
         _date = State(initialValue: date)
         _followsToday = State(initialValue: Calendar.current.isDateInToday(date))
@@ -25,6 +28,7 @@ struct DayDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+                moodWeatherSection
                 imagesSection
                 editor
             }
@@ -65,10 +69,24 @@ struct DayDetailView: View {
     // MARK: - 头部
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let holiday = ChineseHolidays.info(for: date)
+        return VStack(alignment: .leading, spacing: 8) {
             Text(DayText.full(date))
                 .font(.title2).fontWeight(.bold)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let holiday {
+                HStack(spacing: 5) {
+                    Image(systemName: holiday.isOff ? "flag.fill" : "briefcase.fill")
+                        .font(.system(size: 11))
+                    Text(holiday.isOff ? "\(holiday.name) · 放假" : "\(holiday.name) · 上班")
+                        .font(.caption).fontWeight(.semibold)
+                }
+                .foregroundStyle(holiday.isOff ? Color.red : Color.orange)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background((holiday.isOff ? Color.red : Color.orange).opacity(0.12))
+                .clipShape(Capsule())
+            }
 
             HStack(spacing: 12) {
                 Label("\(entry.imageFiles.count) 张图片", systemImage: "photo.on.rectangle")
@@ -76,6 +94,58 @@ struct DayDetailView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - 心情 / 天气
+
+    private var moodWeatherSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            emojiRow(title: "心情",
+                     items: Self.moods,
+                     selected: entry.mood) { value in
+                store.setMood(value, for: date)
+            }
+            emojiRow(title: "天气",
+                     items: Self.weathers,
+                     selected: entry.weather) { value in
+                store.setWeather(value, for: date)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func emojiRow(title: String,
+                          items: [String],
+                          selected: String?,
+                          onPick: @escaping (String?) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.subheadline).fontWeight(.semibold)
+            HStack(spacing: 7) {
+                ForEach(items, id: \.self) { item in
+                    let isOn = (selected == item)
+                    Button {
+                        onPick(isOn ? nil : item)
+                    } label: {
+                        Text(item)
+                            .font(.system(size: 22))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(isOn ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemFill))
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .strokeBorder(isOn ? Color.accentColor : Color.clear, lineWidth: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
