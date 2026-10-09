@@ -13,6 +13,8 @@ struct Entry: Identifiable, Codable, Hashable {
     var mood: String?
     /// 天气 emoji
     var weather: String?
+    /// 标签，例如「旅行」「美食」
+    var tags: [String]
     var createdAt: Date
     var updatedAt: Date
 
@@ -22,6 +24,7 @@ struct Entry: Identifiable, Codable, Hashable {
          imageFiles: [String] = [],
          mood: String? = nil,
          weather: String? = nil,
+         tags: [String] = [],
          createdAt: Date = Date(),
          updatedAt: Date = Date()) {
         self.id = id
@@ -30,6 +33,7 @@ struct Entry: Identifiable, Codable, Hashable {
         self.imageFiles = imageFiles
         self.mood = mood
         self.weather = weather
+        self.tags = tags
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -43,16 +47,29 @@ struct Entry: Identifiable, Codable, Hashable {
         imageFiles = try c.decodeIfPresent([String].self, forKey: .imageFiles) ?? []
         mood       = try c.decodeIfPresent(String.self, forKey: .mood)
         weather    = try c.decodeIfPresent(String.self, forKey: .weather)
+        tags       = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         createdAt  = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt  = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 
-    /// 完全空白（文字、图片、心情、天气都没有）
+    /// 完全空白（文字、图片、心情、天气、标签都没有）
     var isEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && imageFiles.isEmpty
             && mood == nil
             && weather == nil
+            && tags.isEmpty
+    }
+
+    /// 用于搜索的纯文本
+    var searchBlob: String {
+        (text + " " + tags.joined(separator: " ")).lowercased()
+    }
+
+    /// 列表里显示的摘要（去掉首尾空白、压缩换行）
+    var summary: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
     }
 }
 
@@ -104,5 +121,16 @@ enum DayText {
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "yyyy 年 M 月"
         return f.string(from: date)
+    }
+
+    static func compact(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M/d"
+        return f.string(from: date)
+    }
+
+    static func year(_ date: Date) -> Int {
+        Calendar.current.component(.year, from: date)
     }
 }

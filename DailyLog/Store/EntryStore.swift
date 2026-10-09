@@ -97,6 +97,60 @@ final class EntryStore: ObservableObject {
         return result.sorted { $0.year > $1.year }
     }
 
+    // MARK: - 统计
+
+    /// 有内容的天数
+    var recordedDayCount: Int { entries.count }
+
+    /// 总字数
+    var totalWordCount: Int {
+        entries.values.reduce(0) { $0 + $1.text.count }
+    }
+
+    /// 总图片数
+    var totalImageCount: Int {
+        entries.values.reduce(0) { $0 + $1.imageFiles.count }
+    }
+
+    /// 所有用过的标签，按使用次数从多到少
+    func allTags() -> [String] {
+        var counter: [String: Int] = [:]
+        for e in entries.values {
+            for t in e.tags { counter[t, default: 0] += 1 }
+        }
+        return counter.sorted {
+            $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+        }.map(\.key)
+    }
+
+    // MARK: - 搜索
+
+    /// 全文搜索：匹配正文与标签
+    func search(_ query: String, tag: String? = nil) -> [Entry] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var list = entries.values.filter { !$0.isEmpty }
+
+        if let tag, !tag.isEmpty {
+            list = list.filter { $0.tags.contains(tag) }
+        }
+        if !q.isEmpty {
+            list = list.filter { $0.searchBlob.contains(q) }
+        }
+        return list.sorted { $0.dateKey > $1.dateKey }
+    }
+
+    /// 某个自然月内有内容的记录，按日期升序（导出用）
+    func entries(in month: Date) -> [Entry] {
+        let cal = Calendar.current
+        guard let interval = cal.dateInterval(of: .month, for: month) else { return [] }
+        return entries.values
+            .filter { e in
+                guard let d = DayKey.date(from: e.dateKey) else { return false }
+                return d >= interval.start && d < interval.end && !e.isEmpty
+            }
+            .sorted { $0.dateKey < $1.dateKey }
+    }
+
     // MARK: - 写入
 
     func setText(_ text: String, for date: Date) {
@@ -111,6 +165,16 @@ final class EntryStore: ObservableObject {
 
     func setWeather(_ weather: String?, for date: Date) {
         mutate(date) { $0.weather = weather }
+    }
+
+    func setTags(_ tags: [String], for date: Date) {
+        mutate(date) { $0.tags = tags }
+    }
+
+    @discardableResult
+    func addImage(_ image: UIImage, for date: Date) -> Bool {
+        guard let data = image.jpegData(compressionQuality: 0.95) else { return false }
+        return addImage(data, for: date)
     }
 
     @discardableResult

@@ -3,9 +3,16 @@ import SwiftUI
 struct CalendarView: View {
     @EnvironmentObject private var store: EntryStore
 
-    @State private var monthAnchor: Date = Date()
     @StateObject private var checker = UpdateChecker()
-    @State private var showAbout = false
+    @State private var monthAnchor: Date = Date()
+    @State private var monthDirection: Int = 1
+
+    @State private var showSettings = false
+    @State private var showSearch = false
+
+    @State private var exportImage: UIImage?
+    @State private var showExport = false
+    @State private var exporting = false
 
     private let cal = Calendar.current
     private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
@@ -15,49 +22,78 @@ struct CalendarView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    todayCard
-                    monthCard
-                    onThisDayCard
+                    todayCard.staggered(0)
+                    monthCard.staggered(1)
+                    onThisDayCard.staggered(2)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Theme.Background())
             .navigationTitle("每日记录")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showAbout = true
-                    } label: {
+                    Button { showSettings = true } label: {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: "info.circle")
+                            Image(systemName: "gearshape")
                             if checker.hasUpdate {
                                 Circle()
                                     .fill(Color.red)
                                     .frame(width: 7, height: 7)
                                     .offset(x: 4, y: -4)
+                                    .transition(.scale)
                             }
                         }
                     }
-                    .accessibilityLabel("关于与检查更新")
+                    .accessibilityLabel("设置")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { monthAnchor = Date() }
-                    } label: {
-                        Image(systemName: "calendar.badge.clock")
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button { showSearch = true } label: {
+                        Image(systemName: "magnifyingglass")
                     }
-                    .accessibilityLabel("回到本月")
+                    .accessibilityLabel("搜索")
+
+                    Button { exportMonth() } label: {
+                        if exporting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(exporting)
+                    .accessibilityLabel("导出本月长图")
                 }
             }
-            .sheet(isPresented: $showAbout) {
-                AboutView(checker: checker)
+            .sheet(isPresented: $showSettings) {
+                SettingsView(checker: checker)
                     .environmentObject(store)
             }
+            .sheet(isPresented: $showSearch) {
+                SearchView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showExport) {
+                ExportPreviewSheet(image: exportImage, month: monthAnchor)
+            }
             .task {
-                // 启动后静默检查一次，有新版本会在左上角显示红点
                 await checker.check(silent: true)
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: checker.hasUpdate)
+        }
+    }
+
+    // MARK: - 导出
+
+    private func exportMonth() {
+        exporting = true
+        let month = monthAnchor
+        Task { @MainActor in
+            let image = Exporter.monthImage(month: month, store: store)
+            exporting = false
+            if let image {
+                exportImage = image
+                showExport = true
             }
         }
     }
@@ -95,14 +131,27 @@ struct CalendarView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: 6) {
-                        if let mood = entry.mood { Text(mood).font(.system(size: 17)) }
-                        if let weather = entry.weather { Text(weather).font(.system(size: 17)) }
-                        if !entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(entry.text)
+                        if let mood = entry.mood {
+                            Text(mood).font(.system(size: 18))
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                        if let weather = entry.weather {
+                            Text(weather).font(.system(size: 18))
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                        if !entry.summary.isEmpty {
+                            Text(entry.summary)
                                 .font(.subheadline)
                                 .foregroundStyle(.primary)
                                 .lineLimit(3)
                                 .multilineTextAlignment(.leading)
+                        }
+                    }
+                    if !entry.tags.isEmpty {
+                        HStack(spacing: 5) {
+                            ForEach(entry.tags.prefix(4), id: \.self) { tag in
+                                TagChip(text: "#\(tag)")
+                            }
                         }
                     }
                     if !entry.imageFiles.isEmpty {
@@ -122,10 +171,20 @@ struct CalendarView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color.accentColor.opacity(0.22),
+                                 Color.accentColor.opacity(0.05)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.15), lineWidth: 1)
+                    )
+                    .shadow(color: Color.accentColor.opacity(0.16), radius: 12, x: 0, y: 5)
+            )
         }
-        .buttonStyle(.plain)
+        .pressable()
     }
 
     // MARK: - 月历
@@ -137,16 +196,25 @@ struct CalendarView: View {
                     Image(systemName: "chevron.left")
                         .font(.subheadline).fontWeight(.semibold)
                         .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color(.tertiarySystemFill)))
                 }
+                .pressable()
+
                 Spacer()
+
                 Text(DayText.monthTitle(monthAnchor))
                     .font(.headline)
+                    .contentTransition(.numericText())
+
                 Spacer()
+
                 Button { shiftMonth(1) } label: {
                     Image(systemName: "chevron.right")
                         .font(.subheadline).fontWeight(.semibold)
                         .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color(.tertiarySystemFill)))
                 }
+                .pressable()
             }
             .padding(.horizontal, 2)
 
@@ -168,12 +236,17 @@ struct CalendarView: View {
                     }
                 }
             }
+            .id(DayText.monthTitle(monthAnchor))
+            .transition(.asymmetric(
+                insertion: .move(edge: monthDirection > 0 ? .trailing : .leading)
+                    .combined(with: .opacity),
+                removal: .move(edge: monthDirection > 0 ? .leading : .trailing)
+                    .combined(with: .opacity)))
 
             legend
         }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .softCard(padding: 14)
+        .clipped()
     }
 
     private var legend: some View {
@@ -215,7 +288,6 @@ struct CalendarView: View {
             DayDetailView(date: date)
         } label: {
             ZStack {
-                // 背景：有图显示图，节假日染色，其余用系统填充色
                 if let thumb {
                     Image(uiImage: thumb)
                         .resizable()
@@ -258,14 +330,12 @@ struct CalendarView: View {
                     .strokeBorder(isToday ? Color.accentColor : Color.clear, lineWidth: 2)
             )
         }
-        .buttonStyle(.plain)
+        .pressable()
     }
 
     private func dayNumberColor(thumb: UIImage?, holiday: HolidayInfo?) -> Color {
         if thumb != nil { return .white }
-        if let h = holiday {
-            return h.isOff ? .red : .orange
-        }
+        if let h = holiday { return h.isOff ? .red : .orange }
         return .primary
     }
 
@@ -281,6 +351,10 @@ struct CalendarView: View {
                         .foregroundStyle(Color.accentColor)
                     Text("那年今日")
                         .font(.subheadline).fontWeight(.semibold)
+                    Spacer()
+                    Text("\(past.count) 年前")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 ForEach(past) { item in
@@ -296,8 +370,8 @@ struct CalendarView: View {
                                 if let mood = item.entry.mood { Text(mood).font(.caption) }
                                 if let weather = item.entry.weather { Text(weather).font(.caption) }
                             }
-                            if !item.entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(item.entry.text)
+                            if !item.entry.summary.isEmpty {
+                                Text(item.entry.summary)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
@@ -316,15 +390,12 @@ struct CalendarView: View {
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.tertiarySystemGroupedBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .pressable()
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .softCard(padding: 14)
         }
     }
 
@@ -347,8 +418,10 @@ struct CalendarView: View {
     }
 
     private func shiftMonth(_ delta: Int) {
-        if let d = cal.date(byAdding: .month, value: delta, to: monthAnchor) {
-            withAnimation(.easeInOut(duration: 0.2)) { monthAnchor = d }
+        guard let d = cal.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
+        monthDirection = delta
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+            monthAnchor = d
         }
     }
 }
