@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -30,6 +33,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/DailyLog.xcarchive" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
@@ -43,6 +47,41 @@ jobs:
           zip -qry DailyLog-unsigned.ipa Payload
           ls -lh DailyLog-unsigned.ipa
 
+      # 生成给 App 内「检查更新」用的版本清单
+      - name: Write version.json
+        run: |
+          cd "$RUNNER_TEMP"
+          VERSION=$(sed -n 's/.*MARKETING_VERSION: *"\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/project.yml" | head -1)
+          [ -z "$VERSION" ] && VERSION="1.0"
+          NOTES=$(printf '%s' "${{ github.event.head_commit.message }}" | head -1)
+          IPA_URL="https://github.com/${{ github.repository }}/releases/download/latest/DailyLog-unsigned.ipa"
+          jq -n \
+            --arg version "$VERSION" \
+            --argjson build "${{ github.run_number }}" \
+            --arg notes "$NOTES" \
+            --arg ipa "$IPA_URL" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version:$version, build:$build, notes:$notes, ipa:$ipa, date:$date}' \
+            > version.json
+          cat version.json
+
+      # 发到 Releases（固定 tag: latest），下载 ipa 不需要登录 GitHub
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 最新构建 (latest)
+          body: |
+            自动构建的**未签名** ipa，需要自行签名后安装。
+
+            - 构建号：${{ github.run_number }}
+            - 提交：${{ github.sha }}
+          files: |
+            ${{ runner.temp }}/DailyLog-unsigned.ipa
+            ${{ runner.temp }}/version.json
+          make_latest: true
+
+      # 同时保留 Actions artifact 作为备用
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:

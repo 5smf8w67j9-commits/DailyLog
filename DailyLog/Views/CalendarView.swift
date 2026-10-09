@@ -4,6 +4,8 @@ struct CalendarView: View {
     @EnvironmentObject private var store: EntryStore
 
     @State private var monthAnchor: Date = Date()
+    @StateObject private var checker = UpdateChecker()
+    @State private var showAbout = false
 
     private let cal = Calendar.current
     private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
@@ -24,6 +26,22 @@ struct CalendarView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("每日记录")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showAbout = true
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "info.circle")
+                            if checker.hasUpdate {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 7, height: 7)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("关于与检查更新")
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) { monthAnchor = Date() }
@@ -32,6 +50,14 @@ struct CalendarView: View {
                     }
                     .accessibilityLabel("回到本月")
                 }
+            }
+            .sheet(isPresented: $showAbout) {
+                AboutView(checker: checker)
+                    .environmentObject(store)
+            }
+            .task {
+                // 启动后静默检查一次，有新版本会在左上角显示红点
+                await checker.check(silent: true)
             }
         }
     }

@@ -12,12 +12,33 @@
 - **每日详情页**：文字 + 图片（最多一次选 9 张），自动保存，不用点保存按钮。
 - **每天自动换新页**：跨过零点后，停在"今天"的页面会自动切到新的一天，空白待记；App 回到前台时也会立刻校准。
 - **本地存储**：文字存 `Documents/entries.json`，图片压缩后存 `Documents/Images/`，完全离线，不联网。
+- **应用内检查更新**：启动时静默检查 Releases 上的新版本，有新版会在左上角显示红点；点开「关于」可以手动检查并跳转下载。
 - **深浅色**：跟随系统。
 
 ### 节假日数据的维护
 
 放假调休安排每年由国务院办公厅单独发布（通常在前一年 11 月左右）。
 数据在 `DailyLog/Models/Holiday.swift` 的 `table` 里，新一年公布后补一段 `off(...)` / `work(...)` 即可，同时把年份加进 `coveredYears`。
+
+### 更新流程（已自动化）
+
+每次 `git push` 到 main，GitHub Actions 会：
+
+1. 重新构建 **未签名 ipa**
+2. 生成 `version.json`（含版本号、构建号 = Actions 运行序号、提交说明、下载地址）
+3. 把 ipa 和 `version.json` 一起发到 **Releases**，固定 tag 为 `latest`
+
+于是：
+
+- **下载地址永久固定**，且**不需要登录 GitHub**：
+  `https://github.com/5smf8w67j9-commits/DailyLog/releases/latest`
+- **App 内检查更新**读的是：
+  `https://github.com/5smf8w67j9-commits/DailyLog/releases/download/latest/version.json`
+
+构建号每次自增，App 只要发现远端构建号大于本机构建号，就提示有新版本。
+
+> 注意：App 内只能"告诉你"有新版本，**下载后仍需自行签名安装** —— iOS 的签名环节绕不过去。
+> 想彻底免签名一键更新，需要走 TestFlight（需付费开发者账号）。
 
 ## 目录结构
 
@@ -32,8 +53,10 @@ DailyLog/
     ├── Models/Entry.swift
     ├── Models/Holiday.swift          # 中国节假日 / 调休数据
     ├── Store/EntryStore.swift
+    ├── Store/UpdateChecker.swift     # 应用内检查更新
     ├── Views/CalendarView.swift
     ├── Views/DayDetailView.swift
+    ├── Views/AboutView.swift         # 关于 / 检查更新页
     └── Assets.xcassets/            # 图标 + 主题色
 ```
 
